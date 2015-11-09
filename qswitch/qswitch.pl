@@ -2,8 +2,9 @@
 
 use File::Spec;
 use File::Basename;
+use Cwd;
 use Getopt::Long;
-use List::Util qw(max);
+use List::Util;
 
 ## ------------- tab completion
 
@@ -29,72 +30,101 @@ BEGIN {
 }
 
 use Getopt::Complete (
+    'add!' => undef,
+    'remove!' => undef,
+    'modify!' => undef,
     'list!' => undef,
     'edit!' => undef,
     'nano!' => undef,
     'kate!' => undef,
     'emacs!' => undef,
-    '<>' => sub {       
+    '<>' => sub {    
+        my ($command, $value, $option, $other_opts) = @_;
+        return  Getopt::Complete::directories(@_)
+                if( $other_opts->{'<>'} ) ;
+        return []
+            if( $other_opts->{add} );
         return [ keys readTagsDirs($scfile) ];
     }
     );
 
 ## ------------- process command line options 
 
-my $edt = undef;
-my $lst = undef;
-my $kate = undef;
-my $emacs = undef;
-my $nano = undef;
-my $editor = 'nano';                  # my default editor
+sub writeTagsDirs($$) {
+    my ($file, $c)  = @_;
+    open OUT,">",$file || die "Could not open file: $!";    
+    my $tab = List::Util::max map { /^([^ ,]+)/; length($1); } keys $c;   
+    foreach my $k (sort keys $c) {
+        print OUT sprintf("%*s %s",-$tab-1,$k.',',$c->{$k}),"\n";
+    }
+    close OUT;
+}
 
-GetOptions(
-    'edit' => \$edt,
-    'list' => \$lst,
-    'kate' => \$kate,
-    'emacs' => \$emacs,
-    'nano' => \$nano);
+my $editor = 'nano';
 
-$edt |= ($kate | $emacs | $nano);     # editor specs imply --edit
-$editor = "kate -n" if($kate);      
-$editor = "emacs" if($emacs);
+if(!($editor = $ENV{SELECTED_EDITOR})) {
+    my $edfile = "$ENV{HOME}/.selected_editor";
+    if( -e $edfile ) {
+        open ( IN,"<",$edfile ) || die "Could not open file: $!";
+        while(<IN>) {
+            $editor = $2
+                if(/SELECTED_EDITOR *= *(['"]?)(.+)\g1/);
+        }
+        close IN;   
+    }
+}
 
-my $tag = shift @ARGV;                # "tag" to search for
+$ARGS{edit} //= ($ARGS{kate} | $ARGS{emacs} | $ARGS{nano});
+$editor = "kate -n" if($ARGS{kate});      
+$editor = "emacs" if($ARGS{emacs});
 
 # ------------- edit list with specified editor
 
-if($edt) {
-    my $cmd = "$editor $scfile\n";
-    print "$cmd";
+if($ARGS{edit}) {
+    print "$editor $scfile\n";
     exit 0;
 } 
 
 # ------------- print list on screen
 
-if($lst) {
+if($ARGS{list}) {
+    print "cat '$scfile'";
+    exit 0;
+}
+
+my $tag = (shift $ARGS{'<>'}) || die "No alias provided";
+
+# ------------- add or remove directory
+
+if($ARGS{add} || $ARGS{remove} || $ARGS{modify}) {
     my $c = readTagsDirs($scfile);
-    my $tab = max map { /^([^ ,]+)/; length($1); } keys $c;   
-    foreach my $k (sort keys $c) {
-        print "echo '",sprintf("%*s %s",-$tab,$k,$c->{$k}),"'\n";
-    }
+    if($ARGS{remove}) {
+        delete $c->{$tag} || die "Alias '$tag' not found";
+    } else {
+        my $dir = shift $ARGS{'<>'} || '.';
+        $dir = Cwd::getcwd().'/'.$dir
+            if($dir!~/^\//);
+        $dir = Cwd::abs_path($dir);
+        die "Alias already exists! Use --modify instead" 
+            if($add && $c->{$tag});
+        die "Alias does not exists! Use --add instead"
+            if($mod && !$c->{$tag});
+        $c->{$tag} = $dir;
+    } 
+    writeTagsDirs($scfile,$c);    
     exit 0;
 }
 
 # ------------- search entries and 'cd' to first match
 
-if($tag eq "") {
-    print "echo No shortcut specified!\n";
-    exit 1;
-} else {
-    my $c = readTagsDirs($scfile);
-    foreach my $k (sort keys $c) {
-        if($k =~ /$tag/i) {
-            print "cd $c->{$k}\n";
-            exit 0;
-        }       
-    }
+my $c = readTagsDirs($scfile);
+foreach my $k (sort keys $c) {
+    if($k =~ /$tag/i) {
+        print "cd $c->{$k}\n";
+        exit 0;
+    }       
 }
 
-print "echo No shortcut found!\n";
+print "echo No matching alias found for '$tag'!\n";
 
 1;
