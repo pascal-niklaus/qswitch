@@ -5,6 +5,10 @@ use File::Basename;
 use Cwd;
 use Getopt::Long;
 use List::Util;
+use Data::Dumper;
+
+use Text::Fuzzy;
+## sudo perl -MCPAN -e 'install Text::Fuzzy'
 
 ## ------------- tab completion
 
@@ -44,7 +48,8 @@ use Getopt::Complete (
                 if( $other_opts->{'<>'} ) ;
         return []
             if( $other_opts->{add} );
-        return [ keys readTagsDirs($scfile) ];
+        return [ keys %{readTagsDirs($scfile)} ];
+
     }
     );
 
@@ -53,8 +58,8 @@ use Getopt::Complete (
 sub writeTagsDirs($$) {
     my ($file, $c)  = @_;
     open OUT,">",$file || die "Could not open file: $!";    
-    my $tab = List::Util::max map { /^([^ ,]+)/; length($1); } keys $c;   
-    foreach my $k (sort keys $c) {
+    my $tab = List::Util::max map { /^([^ ,]+)/; length($1); } keys %$c;   
+    foreach my $k (sort keys %$c) {
         print OUT sprintf("%*s %s",-$tab-1,$k.',',$c->{$k}),"\n";
     }
     close OUT;
@@ -92,7 +97,7 @@ if($ARGS{list}) {
     exit 0;
 }
 
-my $tag = (shift $ARGS{'<>'}) || die "No alias provided";
+my $tag = (shift @{$ARGS{'<>'}}) || die "No alias provided";
 
 # ------------- add or remove directory
 
@@ -101,7 +106,7 @@ if($ARGS{add} || $ARGS{remove} || $ARGS{modify}) {
     if($ARGS{remove}) {
         delete $c->{$tag} || die "Alias '$tag' not found";
     } else {
-        my $dir = shift $ARGS{'<>'} || '.';
+        my $dir = shift @{$ARGS{'<>'}} || '.';
         $dir = Cwd::getcwd().'/'.$dir
             if($dir!~/^\//);
         $dir = Cwd::abs_path($dir);
@@ -118,13 +123,29 @@ if($ARGS{add} || $ARGS{remove} || $ARGS{modify}) {
 # ------------- search entries and 'cd' to first match
 
 my $c = readTagsDirs($scfile);
-foreach my $k (sort keys $c) {
+
+my %dists = ();
+
+my $tagfuzzy = Text::Fuzzy->new($tag);
+foreach my $k (sort keys %{$c}) {
     if($k =~ /$tag/i) {
-        print "cd $c->{$k}\n";
-        exit 0;
-    }       
+        $dists{$k} = $tagfuzzy->distance($k);
+    }
+}
+my @keys_by_dist = sort { $dists{$a} <=> $dists{$b} } keys %dists;
+
+if (scalar(@keys_by_dist) == 0) {
+    print STDERR "No matching alias found for '$tag'!\n";
+    print ".\n";
+    sys.exit(0);
 }
 
-print "echo No matching alias found for '$tag'!\n";
+if (scalar(@keys_by_dist) > 1) {
+    print STDERR "MULTIPLE TAGS MATCH, TAKING CLOSEST:";
+    foreach my $v (@keys_by_dist) { print STDERR " $v"; }
+    print STDERR "\n";
+}
+
+print $c->{$keys_by_dist[0]},"\n";
 
 1;
