@@ -115,7 +115,7 @@ if __name__ == '__main__':
         if args.alias is None:
             print(f"A path must be provided for alias {args.modify}",
                   file=sys.stderr)
-        elif args.remove not in akeys:
+        elif args.modify not in akeys:
             print(f"Alias {args.modify} not contained in database",
                   file=sys.stderr)
         else:
